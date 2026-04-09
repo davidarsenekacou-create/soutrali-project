@@ -11,14 +11,19 @@ import toast from 'react-hot-toast'
 export default function MembresPage() {
   const params = useParams()
   const tontineId = params.id as string
-  const { peutModifier } = useAuth()
+  const { hasPermission } = useAuth()
+  const peutCreer = hasPermission('membres.create')
+  const peutEditer = hasPermission('membres.edit')
+  const peutToggle = hasPermission('membres.toggle')
+  const peutSupprimerM = hasPermission('membres.delete')
+  const peutModifier = peutCreer || peutEditer || peutToggle || peutSupprimerM
 
   const [tontine, setTontine] = useState<Tontine | null>(null)
   const [membres, setMembres] = useState<Membre[]>([])
   const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
-  const [form, setForm] = useState({ nom: '', contact: '', numero_ordre: '' })
+  const [form, setForm] = useState({ nom: '', contact: '', numero_ordre: '', nombre_bras: '1', date_debut: '', date_fin: '' })
   const [importText, setImportText] = useState('')
   const [showImport, setShowImport] = useState(false)
   const [search, setSearch] = useState('')
@@ -35,8 +40,13 @@ export default function MembresPage() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     const payload = {
-      tontine_id: tontineId, nom: form.nom.trim().toUpperCase(),
-      contact: form.contact.trim() || null, numero_ordre: form.numero_ordre ? Number(form.numero_ordre) : null,
+      tontine_id: tontineId,
+      nom: form.nom.trim().toUpperCase(),
+      contact: form.contact.trim() || null,
+      numero_ordre: form.numero_ordre ? Number(form.numero_ordre) : null,
+      nombre_bras: Math.max(1, Number(form.nombre_bras) || 1),
+      date_debut: form.date_debut || null,
+      date_fin: form.date_fin || null,
     }
     try {
       if (editingId) {
@@ -48,13 +58,20 @@ export default function MembresPage() {
         if (error) throw error
         toast.success('Membre ajouté')
       }
-      setForm({ nom: '', contact: '', numero_ordre: '' }); setEditingId(null); setShowForm(false); loadData()
+      setForm({ nom: '', contact: '', numero_ordre: '', nombre_bras: '1', date_debut: '', date_fin: '' }); setEditingId(null); setShowForm(false); loadData()
     } catch (error: any) { toast.error(error.message || 'Erreur') }
   }
 
   function startEdit(membre: Membre) {
     setEditingId(membre.id)
-    setForm({ nom: membre.nom, contact: membre.contact || '', numero_ordre: membre.numero_ordre?.toString() || '' })
+    setForm({
+      nom: membre.nom,
+      contact: membre.contact || '',
+      numero_ordre: membre.numero_ordre?.toString() || '',
+      nombre_bras: (membre.nombre_bras || 1).toString(),
+      date_debut: membre.date_debut || '',
+      date_fin: membre.date_fin || '',
+    })
     setShowForm(true)
   }
 
@@ -101,11 +118,11 @@ export default function MembresPage() {
             <h1 className="text-xl sm:text-2xl font-bold text-gray-900">Membres — {tontine?.nom}</h1>
             <p className="text-gray-500 text-sm mt-1">{membres.length} membre(s) inscrits</p>
           </div>
-          {peutModifier && (
+          {peutCreer && (
             <div className="flex items-center gap-2">
               <button onClick={() => setShowImport(!showImport)} className="btn-secondary text-xs sm:text-sm">Import en masse</button>
               <button onClick={() => {
-                setEditingId(null); setForm({ nom: '', contact: '', numero_ordre: String(membres.length + 1) }); setShowForm(true)
+                setEditingId(null); setForm({ nom: '', contact: '', numero_ordre: String(membres.length + 1), nombre_bras: '1', date_debut: '', date_fin: '' }); setShowForm(true)
               }} className="btn-primary text-xs sm:text-sm">+ Ajouter</button>
             </div>
           )}
@@ -113,7 +130,7 @@ export default function MembresPage() {
       </div>
 
       {/* Import */}
-      {showImport && peutModifier && (
+      {showImport && peutCreer && (
         <div className="card mb-6">
           <h3 className="font-semibold mb-2 text-sm">Import en masse</h3>
           <p className="text-xs text-gray-500 mb-3">Un membre par ligne : NOM, CONTACT</p>
@@ -130,25 +147,47 @@ export default function MembresPage() {
       {showForm && peutModifier && (
         <div className="card mb-6">
           <h3 className="font-semibold mb-4 text-sm">{editingId ? 'Modifier le membre' : 'Ajouter un membre'}</h3>
-          <form onSubmit={handleSubmit} className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
-            <div>
-              <label className="label-field">Nom *</label>
-              <input type="text" required className="input-field" placeholder="NOM PRENOM"
-                value={form.nom} onChange={(e) => setForm({ ...form, nom: e.target.value })} />
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
+              <div>
+                <label className="label-field">Nom *</label>
+                <input type="text" required className="input-field" placeholder="NOM PRENOM"
+                  value={form.nom} onChange={(e) => setForm({ ...form, nom: e.target.value })} />
+              </div>
+              <div>
+                <label className="label-field">Contact</label>
+                <input type="text" className="input-field" placeholder="07XXXXXXXX"
+                  value={form.contact} onChange={(e) => setForm({ ...form, contact: e.target.value })} />
+              </div>
+              <div>
+                <label className="label-field">N° ordre</label>
+                <input type="number" className="input-field" value={form.numero_ordre}
+                  onChange={(e) => setForm({ ...form, numero_ordre: e.target.value })} />
+              </div>
+              <div>
+                <label className="label-field">Nombre de bras *</label>
+                <input type="number" min={1} required className="input-field" value={form.nombre_bras}
+                  onChange={(e) => setForm({ ...form, nombre_bras: e.target.value })} />
+                <p className="text-[10px] text-gray-400 mt-1">Nombre de prises possibles</p>
+              </div>
             </div>
-            <div>
-              <label className="label-field">Contact</label>
-              <input type="text" className="input-field" placeholder="07XXXXXXXX"
-                value={form.contact} onChange={(e) => setForm({ ...form, contact: e.target.value })} />
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="label-field">Date de début (optionnel)</label>
+                <input type="date" className="input-field" value={form.date_debut}
+                  onChange={(e) => setForm({ ...form, date_debut: e.target.value })} />
+                <p className="text-[10px] text-gray-400 mt-1">Si vide, début de la tontine</p>
+              </div>
+              <div>
+                <label className="label-field">Date de fin (optionnel)</label>
+                <input type="date" className="input-field" value={form.date_fin}
+                  onChange={(e) => setForm({ ...form, date_fin: e.target.value })} />
+                <p className="text-[10px] text-gray-400 mt-1">Si vide, fin de la tontine</p>
+              </div>
             </div>
-            <div>
-              <label className="label-field">N° ordre</label>
-              <input type="number" className="input-field" value={form.numero_ordre}
-                onChange={(e) => setForm({ ...form, numero_ordre: e.target.value })} />
-            </div>
-            <div className="flex items-end gap-2">
-              <button type="submit" className="btn-primary text-sm">{editingId ? 'Mettre à jour' : 'Ajouter'}</button>
+            <div className="flex justify-end gap-2 pt-2 border-t">
               <button type="button" onClick={() => { setShowForm(false); setEditingId(null) }} className="btn-secondary text-sm">Annuler</button>
+              <button type="submit" className="btn-primary text-sm">{editingId ? 'Mettre à jour' : 'Ajouter'}</button>
             </div>
           </form>
         </div>
@@ -168,6 +207,7 @@ export default function MembresPage() {
               <th className="px-4 py-3 text-left font-semibold text-gray-700 w-12">#</th>
               <th className="px-4 py-3 text-left font-semibold text-gray-700">Nom</th>
               <th className="px-4 py-3 text-left font-semibold text-gray-700">Contact</th>
+              <th className="px-4 py-3 text-center font-semibold text-gray-700">Bras</th>
               <th className="px-4 py-3 text-center font-semibold text-gray-700">Statut</th>
               {peutModifier && <th className="px-4 py-3 text-right font-semibold text-gray-700">Actions</th>}
             </tr>
@@ -179,6 +219,13 @@ export default function MembresPage() {
                 <td className="px-4 py-2.5 font-medium text-gray-900">{membre.nom}</td>
                 <td className="px-4 py-2.5 text-gray-600">{membre.contact || '—'}</td>
                 <td className="px-4 py-2.5 text-center">
+                  {(membre.nombre_bras || 1) > 1 ? (
+                    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold bg-warning-50 text-warning-700">×{membre.nombre_bras}</span>
+                  ) : (
+                    <span className="text-gray-400">×1</span>
+                  )}
+                </td>
+                <td className="px-4 py-2.5 text-center">
                   <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
                     membre.actif ? 'bg-success-50 text-success-700' : 'bg-gray-100 text-gray-500'
                   }`}>{membre.actif ? 'Actif' : 'Inactif'}</span>
@@ -186,9 +233,9 @@ export default function MembresPage() {
                 {peutModifier && (
                   <td className="px-4 py-2.5 text-right">
                     <div className="flex items-center justify-end gap-1">
-                      <button onClick={() => startEdit(membre)} className="text-primary-600 text-xs font-medium px-2 py-1 rounded hover:bg-primary-50">Modifier</button>
-                      <button onClick={() => toggleActif(membre)} className="text-warning-600 text-xs font-medium px-2 py-1 rounded hover:bg-warning-50">{membre.actif ? 'Désactiver' : 'Activer'}</button>
-                      <button onClick={() => supprimerMembre(membre)} className="text-danger-600 text-xs font-medium px-2 py-1 rounded hover:bg-danger-50">Supprimer</button>
+                      {peutEditer && <button onClick={() => startEdit(membre)} className="text-primary-600 text-xs font-medium px-2 py-1 rounded hover:bg-primary-50">Modifier</button>}
+                      {peutToggle && <button onClick={() => toggleActif(membre)} className="text-warning-600 text-xs font-medium px-2 py-1 rounded hover:bg-warning-50">{membre.actif ? 'Désactiver' : 'Activer'}</button>}
+                      {peutSupprimerM && <button onClick={() => supprimerMembre(membre)} className="text-danger-600 text-xs font-medium px-2 py-1 rounded hover:bg-danger-50">Supprimer</button>}
                     </div>
                   </td>
                 )}
@@ -211,6 +258,7 @@ export default function MembresPage() {
                 <div>
                   <h3 className="font-medium text-sm text-gray-900">{membre.nom}</h3>
                   {membre.contact && <p className="text-xs text-gray-500">{membre.contact}</p>}
+                  <p className="text-[10px] text-gray-400 mt-0.5">×{membre.nombre_bras || 1} bras</p>
                 </div>
               </div>
               <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium ${
@@ -219,9 +267,9 @@ export default function MembresPage() {
             </div>
             {peutModifier && (
               <div className="flex items-center gap-3 mt-2 pt-2 border-t">
-                <button onClick={() => startEdit(membre)} className="text-primary-600 text-xs font-medium">Modifier</button>
-                <button onClick={() => toggleActif(membre)} className="text-warning-600 text-xs font-medium">{membre.actif ? 'Désactiver' : 'Activer'}</button>
-                <button onClick={() => supprimerMembre(membre)} className="text-danger-600 text-xs font-medium">Supprimer</button>
+                {peutEditer && <button onClick={() => startEdit(membre)} className="text-primary-600 text-xs font-medium">Modifier</button>}
+                {peutToggle && <button onClick={() => toggleActif(membre)} className="text-warning-600 text-xs font-medium">{membre.actif ? 'Désactiver' : 'Activer'}</button>}
+                {peutSupprimerM && <button onClick={() => supprimerMembre(membre)} className="text-danger-600 text-xs font-medium">Supprimer</button>}
               </div>
             )}
           </div>

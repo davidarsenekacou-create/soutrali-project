@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
-import { Utilisateur, Tontine } from '@/lib/types'
+import { Utilisateur, Tontine, PERMISSION_GROUPS, ALL_PERMISSIONS } from '@/lib/types'
 import { useAuth } from '@/lib/auth'
 import toast from 'react-hot-toast'
 
@@ -36,6 +36,10 @@ export default function GerantesPage() {
   // Attribution tontines
   const [showAttribution, setShowAttribution] = useState<string | null>(null)
   const [tontineSelectionnee, setTontineSelectionnee] = useState('')
+
+  // Panneau des permissions
+  const [showPermissions, setShowPermissions] = useState<string | null>(null)
+  const [savingPerms, setSavingPerms] = useState(false)
 
   useEffect(() => {
     loadData()
@@ -102,11 +106,19 @@ export default function GerantesPage() {
           return
         }
 
+        // Permissions par défaut selon le rôle
+        const defaultPerms = form.role === 'admin'
+          ? ALL_PERMISSIONS
+          : form.role === 'responsable'
+            ? ['view.dashboard', 'view.tontines', 'view.comptes', 'view.gerantes', 'view.statistiques']
+            : ['view.tontines', 'cotisations.cocher', 'prises.create']
+
         const { error } = await supabase.from('utilisateurs').insert({
           nom: form.nom.trim(),
           login: form.login.trim(),
           mot_de_passe: hash,
           role: form.role,
+          permissions: defaultPerms,
         })
         if (error) throw error
         toast.success('Compte créé')
@@ -164,6 +176,44 @@ export default function GerantesPage() {
       loadData()
     } catch (error: any) {
       toast.error(error.message?.includes('unique') ? 'Déjà attribuée' : error.message || 'Erreur')
+    }
+  }
+
+  // Permissions
+  async function togglePermission(user: UtilisateurAvecTontines, key: string) {
+    setSavingPerms(true)
+    const current = user.permissions || []
+    const next = current.includes(key) ? current.filter((p) => p !== key) : [...current, key]
+    try {
+      const { error } = await supabase
+        .from('utilisateurs')
+        .update({ permissions: next })
+        .eq('id', user.id)
+      if (error) throw error
+      // Mise à jour optimiste
+      setUtilisateurs((prev) => prev.map((u) => (u.id === user.id ? { ...u, permissions: next } : u)))
+    } catch (e: any) {
+      toast.error(e.message || 'Erreur')
+    } finally {
+      setSavingPerms(false)
+    }
+  }
+
+  async function setAllPermissions(user: UtilisateurAvecTontines, all: boolean) {
+    setSavingPerms(true)
+    const next = all ? [...ALL_PERMISSIONS] : []
+    try {
+      const { error } = await supabase
+        .from('utilisateurs')
+        .update({ permissions: next })
+        .eq('id', user.id)
+      if (error) throw error
+      setUtilisateurs((prev) => prev.map((u) => (u.id === user.id ? { ...u, permissions: next } : u)))
+      toast.success(all ? 'Toutes les permissions accordées' : 'Toutes les permissions retirées')
+    } catch (e: any) {
+      toast.error(e.message || 'Erreur')
+    } finally {
+      setSavingPerms(false)
     }
   }
 
@@ -319,8 +369,70 @@ export default function GerantesPage() {
                     {showAttribution === user.id ? 'Fermer' : 'Tontines'}
                   </button>
                 )}
+                {user.role !== 'admin' && (
+                  <button
+                    onClick={() => setShowPermissions(showPermissions === user.id ? null : user.id)}
+                    className="btn-secondary text-xs"
+                  >
+                    {showPermissions === user.id ? 'Fermer' : 'Permissions'}
+                  </button>
+                )}
               </div>
             </div>
+
+            {/* Panneau permissions */}
+            {showPermissions === user.id && user.role !== 'admin' && (
+              <div className="mt-4 pt-4 border-t">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-3">
+                  <div>
+                    <h4 className="text-sm font-semibold text-gray-700">Permissions de {user.nom}</h4>
+                    <p className="text-xs text-gray-400">Cochez ce que ce compte est autorisé à faire dans l'application</p>
+                  </div>
+                  <div className="flex gap-2">
+                    <button
+                      disabled={savingPerms}
+                      onClick={() => setAllPermissions(user, true)}
+                      className="text-xs font-medium text-success-700 hover:underline"
+                    >
+                      Tout cocher
+                    </button>
+                    <span className="text-gray-300">|</span>
+                    <button
+                      disabled={savingPerms}
+                      onClick={() => setAllPermissions(user, false)}
+                      className="text-xs font-medium text-danger-600 hover:underline"
+                    >
+                      Tout décocher
+                    </button>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {PERMISSION_GROUPS.map((group) => (
+                    <div key={group.titre} className="border border-gray-200 rounded-lg p-3">
+                      <h5 className="text-xs font-bold text-gray-700 uppercase tracking-wide mb-2">{group.titre}</h5>
+                      <div className="space-y-1.5">
+                        {group.permissions.map((perm) => {
+                          const checked = (user.permissions || []).includes(perm.key)
+                          return (
+                            <label key={perm.key} className="flex items-center gap-2 text-sm cursor-pointer hover:bg-gray-50 rounded px-1 py-0.5">
+                              <input
+                                type="checkbox"
+                                checked={checked}
+                                disabled={savingPerms}
+                                onChange={() => togglePermission(user, perm.key)}
+                                className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                              />
+                              <span className="text-gray-700">{perm.label}</span>
+                            </label>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {/* Attribution de tontines (gérantes uniquement) */}
             {showAttribution === user.id && user.role === 'gerante' && (

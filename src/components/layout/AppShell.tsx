@@ -25,7 +25,7 @@ function MobileHeader({ onMenuToggle }: { onMenuToggle: () => void }) {
 }
 
 function AppContent({ children }: { children: React.ReactNode }) {
-  const { utilisateur, loading } = useAuth()
+  const { utilisateur, loading, hasPermission } = useAuth()
   const pathname = usePathname()
   const [mobileOpen, setMobileOpen] = useState(false)
 
@@ -55,12 +55,38 @@ function AppContent({ children }: { children: React.ReactNode }) {
     )
   }
 
-  // Gérante : bloquer l'accès aux pages non autorisées
-  if (utilisateur.role === 'gerante' && !pathname.startsWith('/tontines')) {
-    if (typeof window !== 'undefined') {
-      window.location.href = '/tontines'
-    }
+  // Vérifier que l'utilisateur a la permission de voir cette page
+  // Mapping URL → permission
+  function permissionForPath(p: string): string | null {
+    if (p === '/' || p === '') return 'view.dashboard'
+    if (p.startsWith('/statistiques')) return 'view.statistiques'
+    if (p.startsWith('/tontines')) return 'view.tontines'
+    if (p.startsWith('/comptes')) return 'view.comptes'
+    if (p.startsWith('/gerantes')) return 'view.gerantes'
     return null
+  }
+
+  if (utilisateur.role !== 'admin') {
+    const requiredPerm = permissionForPath(pathname)
+    if (requiredPerm && !hasPermission(requiredPerm)) {
+      // Rediriger vers la première page autorisée
+      const fallback = ['view.dashboard', 'view.tontines', 'view.statistiques', 'view.comptes', 'view.gerantes']
+        .find((k) => hasPermission(k))
+      const dest = fallback === 'view.dashboard' ? '/'
+        : fallback === 'view.tontines' ? '/tontines'
+        : fallback === 'view.statistiques' ? '/statistiques'
+        : fallback === 'view.comptes' ? '/comptes'
+        : fallback === 'view.gerantes' ? '/gerantes'
+        : '/login'
+      if (typeof window !== 'undefined') {
+        if (dest === '/login') {
+          // aucun accès — déconnexion
+          localStorage.removeItem('soutrali_user')
+        }
+        window.location.href = dest
+      }
+      return null
+    }
   }
 
   return (

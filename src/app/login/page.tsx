@@ -21,8 +21,8 @@ export default function LoginPage() {
       setErreur(result.error)
       setLoading(false)
     } else {
-      // Gérante : uniquement accès aux tontines
-      router.push(result.role === 'gerante' ? '/tontines' : '/')
+      // Rediriger vers la racine — AppShell redirige vers la première page autorisée si besoin
+      router.push('/')
     }
   }
 

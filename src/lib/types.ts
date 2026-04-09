@@ -17,6 +17,9 @@ export interface Membre {
   nom: string
   contact: string | null
   numero_ordre: number | null
+  nombre_bras: number
+  date_debut: string | null
+  date_fin: string | null
   actif: boolean
   created_at: string
   updated_at: string
@@ -30,6 +33,7 @@ export interface Cotisation {
   montant: number
   compte_transaction_id: string | null
   id_transaction: string | null
+  operateur: string | null
   created_at: string
 }
 
@@ -37,10 +41,18 @@ export interface CompteTransaction {
   id: string
   nom: string
   numero: string
-  operateur: string | null
+  operateurs: string[]
   actif: boolean
   created_at: string
 }
+
+export const OPERATEURS_DISPONIBLES = [
+  'Orange Money',
+  'MTN Mobile Money',
+  'Moov Money',
+  'Wave',
+  'Autre',
+]
 
 export interface Prise {
   id: string
@@ -90,10 +102,76 @@ export interface Utilisateur {
   nom: string
   login: string
   role: 'admin' | 'responsable' | 'gerante'
+  permissions: string[]
   actif: boolean
   created_at: string
   updated_at: string
 }
+
+// Liste exhaustive des permissions disponibles, groupées par section
+export interface PermissionDef {
+  key: string
+  label: string
+}
+
+export interface PermissionGroup {
+  titre: string
+  permissions: PermissionDef[]
+}
+
+export const PERMISSION_GROUPS: PermissionGroup[] = [
+  {
+    titre: 'Onglets visibles',
+    permissions: [
+      { key: 'view.dashboard', label: 'Voir le tableau de bord' },
+      { key: 'view.tontines', label: 'Voir l\'onglet Tontines' },
+      { key: 'view.comptes', label: 'Voir l\'onglet Comptes' },
+      { key: 'view.gerantes', label: 'Voir l\'onglet Gestion des comptes' },
+      { key: 'view.statistiques', label: 'Voir l\'onglet Statistiques' },
+    ],
+  },
+  {
+    titre: 'Tontines',
+    permissions: [
+      { key: 'tontines.create', label: 'Créer une tontine' },
+      { key: 'tontines.edit', label: 'Modifier une tontine' },
+      { key: 'tontines.delete', label: 'Supprimer une tontine' },
+    ],
+  },
+  {
+    titre: 'Membres',
+    permissions: [
+      { key: 'membres.create', label: 'Ajouter un membre' },
+      { key: 'membres.edit', label: 'Modifier un membre' },
+      { key: 'membres.toggle', label: 'Activer / désactiver un membre' },
+      { key: 'membres.delete', label: 'Supprimer un membre' },
+    ],
+  },
+  {
+    titre: 'Cotisations',
+    permissions: [
+      { key: 'cotisations.cocher', label: 'Cocher un paiement' },
+      { key: 'cotisations.decocher', label: 'Décocher un paiement' },
+    ],
+  },
+  {
+    titre: 'Prises',
+    permissions: [
+      { key: 'prises.create', label: 'Attribuer une prise' },
+      { key: 'prises.delete', label: 'Retirer une prise' },
+    ],
+  },
+  {
+    titre: 'Comptes de transaction',
+    permissions: [
+      { key: 'comptes.create', label: 'Ajouter un compte' },
+      { key: 'comptes.edit', label: 'Modifier / désactiver un compte' },
+      { key: 'comptes.delete', label: 'Supprimer un compte' },
+    ],
+  },
+]
+
+export const ALL_PERMISSIONS: string[] = PERMISSION_GROUPS.flatMap((g) => g.permissions.map((p) => p.key))
 
 export interface TontineGerante {
   id: string

@@ -10,7 +10,7 @@ import toast from 'react-hot-toast'
 
 interface MembreAvecCotisations {
   membre: Membre
-  paiements: Map<number, { compte_transaction_id: string | null; id_transaction: string | null }>
+  paiements: Map<number, { compte_transaction_id: string | null; id_transaction: string | null; operateur: string | null }>
   total: number
   prises: Prise[]
 }
@@ -20,6 +20,7 @@ interface PopupState {
   membreNom: string
   jour: number
   compteId: string
+  operateur: string
   idTransaction: string
   nbJours: number
 }
@@ -58,8 +59,12 @@ function getMonthsInRange(dateDebut: string, dateFin: string): MoisItem[] {
 export default function TontineDetailPage() {
   const params = useParams()
   const tontineId = params.id as string
-  const { isResponsable, utilisateur } = useAuth()
+  const { isResponsable, utilisateur, hasPermission } = useAuth()
   const isGerante = utilisateur?.role === 'gerante'
+  const peutCocher = hasPermission('cotisations.cocher')
+  const peutDecocher = hasPermission('cotisations.decocher')
+  const peutCreerPrise = hasPermission('prises.create')
+  const peutSupprimerPrise = hasPermission('prises.delete')
 
   const [tontine, setTontine] = useState<Tontine | null>(null)
   const [grille, setGrille] = useState<MembreAvecCotisations[]>([])
@@ -146,12 +151,13 @@ export default function TontineDetailPage() {
 
       const grilleData: MembreAvecCotisations[] = membresData.map((membre) => {
         const paiementsMembre = cotisData.filter((cot) => cot.membre_id === membre.id)
-        const paiementsMap = new Map<number, { compte_transaction_id: string | null; id_transaction: string | null }>()
+        const paiementsMap = new Map<number, { compte_transaction_id: string | null; id_transaction: string | null; operateur: string | null }>()
         paiementsMembre.forEach((cot) => {
           const jour = new Date(cot.date_paiement).getDate()
           paiementsMap.set(jour, {
             compte_transaction_id: cot.compte_transaction_id,
             id_transaction: cot.id_transaction,
+            operateur: cot.operateur || null,
           })
         })
         const total = paiementsMap.size * t.montant_journalier
@@ -174,19 +180,50 @@ export default function TontineDetailPage() {
 
   // Ouvrir la popup pour cocher un paiement
   function ouvrirPopup(membreId: string, membreNom: string, jour: number) {
+    const compteParDefaut = comptes.length > 0 ? comptes[0] : null
     setPopup({
       membreId,
       membreNom,
       jour,
-      compteId: comptes.length > 0 ? comptes[0].id : '',
+      compteId: compteParDefaut?.id || '',
+      operateur: compteParDefaut && compteParDefaut.operateurs && compteParDefaut.operateurs.length === 1 ? compteParDefaut.operateurs[0] : '',
       idTransaction: '',
       nbJours: 1,
     })
   }
 
+  // Quand on change le compte dans la popup, réinitialiser ou auto-sélectionner l'opérateur
+  function changerCompteDansPopup(compteId: string) {
+    if (!popup) return
+    const compte = comptes.find((c) => c.id === compteId)
+    const ops = compte?.operateurs || []
+    setPopup({
+      ...popup,
+      compteId,
+      operateur: ops.length === 1 ? ops[0] : '',
+    })
+  }
+
+  // Vérifier si une date est dans la plage active d'un membre
+  function membreActifLeJour(membre: Membre, jour: number): boolean {
+    if (!tontine) return false
+    const dateStr = `${annee}-${String(mois).padStart(2, '0')}-${String(jour).padStart(2, '0')}`
+    const debut = membre.date_debut || tontine.date_debut
+    const fin = membre.date_fin || tontine.date_fin
+    return dateStr >= debut && dateStr <= fin
+  }
+
   // Confirmer le paiement via popup
   async function confirmerPaiement() {
     if (!popup || !tontine) return
+
+    // Vérifier opérateur si le compte en a plusieurs
+    const compteSel = comptes.find((c) => c.id === popup.compteId)
+    const ops = compteSel?.operateurs || []
+    if (ops.length > 1 && !popup.operateur) {
+      toast.error('Veuillez sélectionner l\'opérateur utilisé')
+      return
+    }
 
     // Vérifier unicité de l'ID transaction
     if (popup.idTransaction.trim()) {
@@ -214,6 +251,7 @@ export default function TontineDetailPage() {
 
         const item = grille.find((g) => g.membre.id === popup.membreId)
         if (item?.paiements.has(jour)) continue
+        if (item && !membreActifLeJour(item.membre, jour)) continue
 
         const dateStr = `${annee}-${String(mois).padStart(2, '0')}-${String(jour).padStart(2, '0')}`
         inserts.push({
@@ -223,6 +261,7 @@ export default function TontineDetailPage() {
           montant: tontine.montant_journalier,
           compte_transaction_id: popup.compteId || null,
           id_transaction: popup.idTransaction.trim() || null,
+          operateur: popup.operateur || null,
         })
         joursCoches.push(jour)
       }
@@ -246,6 +285,7 @@ export default function TontineDetailPage() {
             newPaiements.set(jour, {
               compte_transaction_id: popup.compteId || null,
               id_transaction: popup.idTransaction.trim() || null,
+              operateur: popup.operateur || null,
             })
           })
           return {
@@ -269,9 +309,8 @@ export default function TontineDetailPage() {
   async function decocherPaiement(membreId: string, jour: number) {
     if (!tontine) return
 
-    // Gérante ne peut pas décocher
-    if (isGerante) {
-      toast.error('Vous ne pouvez pas retirer un paiement. Veuillez contacter l\'administrateur de la plateforme.')
+    if (!peutDecocher) {
+      toast.error('Vous n\'avez pas la permission de retirer un paiement. Veuillez contacter l\'administrateur.')
       return
     }
 
@@ -327,6 +366,17 @@ export default function TontineDetailPage() {
   // Confirmer une prise
   async function confirmerPrise() {
     if (!prisePopup) return
+
+    // Vérifier que le membre n'a pas dépassé son nombre de bras
+    const item = grille.find((g) => g.membre.id === prisePopup.membreId)
+    if (item) {
+      const nbBras = item.membre.nombre_bras || 1
+      if (item.prises.length >= nbBras) {
+        toast.error(`Ce membre a déjà utilisé ses ${nbBras} bras`)
+        return
+      }
+    }
+
     setSaving(true)
 
     try {
@@ -513,57 +563,78 @@ export default function TontineDetailPage() {
 
                       {/* PRISE */}
                       <td className="px-2 py-1.5 text-center">
-                        {hasPriseCeMois ? (
-                          <button
-                            onClick={() => ouvrirPrisePopup(item.membre.id, item.membre.nom)}
-                            className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-success-500 text-white cursor-pointer hover:bg-success-600"
-                            title="Voir / ajouter une prise"
-                          >
-                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
-                            </svg>
-                          </button>
-                        ) : !isResponsable ? (
-                          <button
-                            onClick={() => ouvrirPrisePopup(item.membre.id, item.membre.nom)}
-                            className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-gray-100 text-gray-400 hover:bg-warning-100 hover:text-warning-600 text-[10px] transition-colors"
-                            title={`Attribuer une prise à ${item.membre.nom}`}
-                          >
-                            -
-                          </button>
-                        ) : (
-                          <span className="text-gray-300">-</span>
-                        )}
+                        {(() => {
+                          const nbBras = item.membre.nombre_bras || 1
+                          const nbPrisesTotal = item.prises.length
+                          const peutEncorePrendre = nbPrisesTotal < nbBras
+                          const label = nbBras > 1 ? `${nbPrisesTotal}/${nbBras}` : ''
+                          if (nbPrisesTotal > 0) {
+                            return (
+                              <button
+                                onClick={() => ouvrirPrisePopup(item.membre.id, item.membre.nom)}
+                                className="inline-flex items-center justify-center min-w-6 h-6 px-1.5 rounded-full bg-success-500 text-white cursor-pointer hover:bg-success-600 text-[10px] font-bold gap-1"
+                                title={`${nbPrisesTotal} prise(s) sur ${nbBras} bras`}
+                              >
+                                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                                </svg>
+                                {label}
+                              </button>
+                            )
+                          }
+                          if (peutCreerPrise && peutEncorePrendre) {
+                            return (
+                              <button
+                                onClick={() => ouvrirPrisePopup(item.membre.id, item.membre.nom)}
+                                className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-gray-100 text-gray-400 hover:bg-warning-100 hover:text-warning-600 text-[10px] transition-colors"
+                                title={`Attribuer une prise à ${item.membre.nom}${nbBras > 1 ? ` (${nbBras} bras)` : ''}`}
+                              >
+                                -
+                              </button>
+                            )
+                          }
+                          return <span className="text-gray-300">-</span>
+                        })()}
                       </td>
 
                       {/* Jours */}
                       {Array.from({ length: nbJours }, (_, i) => i + 1).map((jour) => {
                         const paiement = item.paiements.get(jour)
                         const estPaye = !!paiement
+                        const dansPlage = membreActifLeJour(item.membre, jour)
 
                         let tooltip = ''
                         if (estPaye && paiement) {
                           const compte = comptes.find((c) => c.id === paiement.compte_transaction_id)
                           if (compte) tooltip += `${compte.nom} (${compte.numero})`
+                          if (paiement.operateur) tooltip += `\n${paiement.operateur}`
                           if (paiement.id_transaction) tooltip += `\nTx: ${paiement.id_transaction}`
+                        } else if (!dansPlage) {
+                          tooltip = 'Hors période d\'adhésion du membre'
                         }
 
                         return (
                           <td
                             key={jour}
-                            className={`px-0 py-0 text-center ${estPaye ? 'cell-paye' : 'cell-non-paye'} ${isResponsable ? 'cursor-default' : ''}`}
+                            className={`px-0 py-0 text-center ${
+                              !dansPlage ? 'bg-gray-100 cursor-not-allowed' : estPaye ? 'cell-paye' : 'cell-non-paye'
+                            } ${!peutCocher && !peutDecocher ? 'cursor-default' : ''}`}
                             onClick={() => {
-                              if (isResponsable) return
+                              if (!dansPlage) return
                               if (estPaye) {
+                                if (!peutDecocher) return
                                 decocherPaiement(item.membre.id, jour)
                               } else {
+                                if (!peutCocher) return
                                 ouvrirPopup(item.membre.id, item.membre.nom, jour)
                               }
                             }}
                             title={tooltip || undefined}
                           >
                             <div className="w-full h-7 flex items-center justify-center">
-                              {estPaye ? (
+                              {!dansPlage ? (
+                                <span className="text-gray-300 text-[10px]">×</span>
+                              ) : estPaye ? (
                                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
                                 </svg>
@@ -646,12 +717,12 @@ export default function TontineDetailPage() {
                 <select
                   className="input-field"
                   value={popup.compteId}
-                  onChange={(e) => setPopup({ ...popup, compteId: e.target.value })}
+                  onChange={(e) => changerCompteDansPopup(e.target.value)}
                 >
                   <option value="">— Sélectionner le numéro —</option>
                   {comptes.map((c) => (
                     <option key={c.id} value={c.id}>
-                      {c.nom} — {c.numero} {c.operateur ? `(${c.operateur})` : ''}
+                      {c.nom} — {c.numero}
                     </option>
                   ))}
                 </select>
@@ -662,6 +733,35 @@ export default function TontineDetailPage() {
                   </p>
                 )}
               </div>
+
+              {/* Sélection opérateur si le compte en a plusieurs */}
+              {(() => {
+                const compteSel = comptes.find((c) => c.id === popup.compteId)
+                const ops = compteSel?.operateurs || []
+                if (!compteSel || ops.length === 0) return null
+                if (ops.length === 1) {
+                  return (
+                    <div className="text-xs text-gray-500">
+                      Opérateur : <span className="font-medium text-gray-700">{ops[0]}</span>
+                    </div>
+                  )
+                }
+                return (
+                  <div>
+                    <label className="label-field">Opérateur utilisé *</label>
+                    <select
+                      className="input-field"
+                      value={popup.operateur}
+                      onChange={(e) => setPopup({ ...popup, operateur: e.target.value })}
+                    >
+                      <option value="">— Sélectionner l'opérateur —</option>
+                      {ops.map((op) => (
+                        <option key={op} value={op}>{op}</option>
+                      ))}
+                    </select>
+                  </div>
+                )
+              })()}
 
               <div>
                 <label className="label-field">ID de la transaction</label>
@@ -695,12 +795,20 @@ export default function TontineDetailPage() {
       {prisePopup && (
         <div className="fixed inset-0 bg-black/50 flex items-end sm:items-center justify-center z-50" onClick={() => setPrisePopup(null)}>
           <div className="bg-white rounded-t-xl sm:rounded-xl shadow-2xl w-full sm:max-w-lg p-5 sm:p-6 max-h-[85vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-            <h3 className="text-lg font-bold text-gray-900 mb-1">
-              Prise — {prisePopup.membreNom}
-            </h3>
-            <p className="text-sm text-gray-500 mb-5">
-              Tontine : {tontine.nom}
-            </p>
+            {(() => {
+              const itemMembre = grille.find((g) => g.membre.id === prisePopup.membreId)
+              const nbBras = itemMembre?.membre.nombre_bras || 1
+              return (
+                <>
+                  <h3 className="text-lg font-bold text-gray-900 mb-1">
+                    Prise — {prisePopup.membreNom}
+                  </h3>
+                  <p className="text-sm text-gray-500 mb-5">
+                    Tontine : {tontine.nom} {nbBras > 1 && <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold bg-warning-50 text-warning-700">{prisePopup.prisesExistantes.length}/{nbBras} bras</span>}
+                  </p>
+                </>
+              )
+            })()}
 
             {/* Prises existantes */}
             {prisePopup.prisesExistantes.length > 0 && (
@@ -713,7 +821,7 @@ export default function TontineDetailPage() {
                         <span className="text-sm font-medium text-success-800">
                           {p.periode || `${MOIS_NOMS[p.mois]} ${p.annee}`}
                         </span>
-                        {!isResponsable && !isGerante && (
+                        {peutSupprimerPrise && (
                           <button
                             onClick={() => supprimerPrise(p.id)}
                             className="text-danger-500 text-xs font-medium hover:underline"
@@ -735,8 +843,24 @@ export default function TontineDetailPage() {
               </div>
             )}
 
-            {/* Formulaire nouvelle prise (pas pour responsable) */}
-            {!isResponsable && (
+            {/* Formulaire nouvelle prise (pas pour responsable, et bras disponibles) */}
+            {peutCreerPrise && (() => {
+              const itemMembre = grille.find((g) => g.membre.id === prisePopup.membreId)
+              const nbBras = itemMembre?.membre.nombre_bras || 1
+              if (prisePopup.prisesExistantes.length >= nbBras) {
+                return (
+                  <div className="bg-warning-50 border border-warning-200 rounded-lg p-3 text-xs text-warning-700">
+                    Ce membre a utilisé tous ses bras ({nbBras}). Aucune nouvelle prise possible.
+                  </div>
+                )
+              }
+              return null
+            })()}
+            {peutCreerPrise && (() => {
+              const itemMembre = grille.find((g) => g.membre.id === prisePopup.membreId)
+              const nbBras = itemMembre?.membre.nombre_bras || 1
+              return prisePopup.prisesExistantes.length < nbBras
+            })() && (
               <>
                 <h4 className="text-sm font-semibold text-gray-700 mb-3">
                   {prisePopup.prisesExistantes.length > 0 ? 'Ajouter une nouvelle prise' : 'Enregistrer la prise'}
@@ -812,8 +936,8 @@ export default function TontineDetailPage() {
               </>
             )}
 
-            {/* Responsable : juste le bouton fermer */}
-            {isResponsable && (
+            {/* Pas de droit de créer : juste fermer */}
+            {!peutCreerPrise && (
               <div className="flex justify-end mt-4">
                 <button onClick={() => setPrisePopup(null)} className="btn-secondary text-sm">
                   Fermer

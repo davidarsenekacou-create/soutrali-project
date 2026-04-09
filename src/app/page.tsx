@@ -30,7 +30,8 @@ interface MembreStats {
 }
 
 export default function Dashboard() {
-  const { peutModifier } = useAuth()
+  const { hasPermission } = useAuth()
+  const peutCreerTontine = hasPermission('tontines.create')
   const [tontines, setTontines] = useState<Tontine[]>([])
   const [stats, setStats] = useState<StatsGlobales>({
     totalTontines: 0,
@@ -45,6 +46,7 @@ export default function Dashboard() {
   const [filtreDateFin, setFiltreDateFin] = useState('')
   const [filtreTontineId, setFiltreTontineId] = useState('')
   const [filtreCompteId, setFiltreCompteId] = useState('')
+  const [filtreOperateur, setFiltreOperateur] = useState('')
   const [comptesTransaction, setComptesTransaction] = useState<CompteTransaction[]>([])
   const [showFiltres, setShowFiltres] = useState(false)
 
@@ -78,24 +80,34 @@ export default function Dashboard() {
       let membresQuery = supabase.from('membres').select('*', { count: 'exact', head: true }).eq('actif', true)
       let cotisationsQuery = supabase.from('cotisations').select('montant')
       let prisesQuery = supabase.from('prises').select('*', { count: 'exact', head: true })
+      let tontinesFiltreesIds: string[] | null = null
 
       if (filtreTontineId) {
         membresQuery = membresQuery.eq('tontine_id', filtreTontineId)
         cotisationsQuery = cotisationsQuery.eq('tontine_id', filtreTontineId)
         prisesQuery = prisesQuery.eq('tontine_id', filtreTontineId)
+        tontinesFiltreesIds = [filtreTontineId]
       }
-      if (filtreDateDebut) cotisationsQuery = cotisationsQuery.gte('date_paiement', filtreDateDebut)
-      if (filtreDateFin) cotisationsQuery = cotisationsQuery.lte('date_paiement', filtreDateFin)
+      if (filtreDateDebut) {
+        cotisationsQuery = cotisationsQuery.gte('date_paiement', filtreDateDebut)
+        prisesQuery = prisesQuery.gte('date_prise', filtreDateDebut)
+      }
+      if (filtreDateFin) {
+        cotisationsQuery = cotisationsQuery.lte('date_paiement', filtreDateFin)
+        prisesQuery = prisesQuery.lte('date_prise', filtreDateFin)
+      }
       if (filtreCompteId) cotisationsQuery = cotisationsQuery.eq('compte_transaction_id', filtreCompteId)
+      if (filtreOperateur) cotisationsQuery = cotisationsQuery.eq('operateur', filtreOperateur)
 
       const [{ count: membresCount }, { data: cotisationsData }, { count: prisesCount }] = await Promise.all([
         membresQuery, cotisationsQuery, prisesQuery,
       ])
 
       const totalCollecte = cotisationsData?.reduce((sum, c) => sum + Number(c.montant), 0) || 0
+      const totalTontinesAffiches = tontinesFiltreesIds ? tontinesFiltreesIds.length : tontines.length
 
       setStats({
-        totalTontines: tontines.length,
+        totalTontines: totalTontinesAffiches,
         totalMembres: membresCount || 0,
         totalCollecte,
         totalPrises: prisesCount || 0,
@@ -105,7 +117,7 @@ export default function Dashboard() {
     } finally {
       setLoading(false)
     }
-  }, [filtreTontineId, filtreDateDebut, filtreDateFin, filtreCompteId, tontines.length])
+  }, [filtreTontineId, filtreDateDebut, filtreDateFin, filtreCompteId, filtreOperateur, tontines.length])
 
   useEffect(() => {
     if (tontines.length >= 0) loadStats()
@@ -211,7 +223,9 @@ export default function Dashboard() {
 
   const moisActuel = new Date().getMonth() + 1
   const anneeActuelle = new Date().getFullYear()
-  const hasFilters = filtreDateDebut || filtreDateFin || filtreTontineId || filtreCompteId || membreSelectionne
+  const compteSelectionne = comptesTransaction.find((c) => c.id === filtreCompteId)
+  const operateursDuCompte = compteSelectionne?.operateurs || []
+  const hasFilters = filtreDateDebut || filtreDateFin || filtreTontineId || filtreCompteId || filtreOperateur || membreSelectionne
 
   return (
     <div>
@@ -233,7 +247,7 @@ export default function Dashboard() {
             </svg>
             Filtres
           </button>
-          {peutModifier && (
+          {peutCreerTontine && (
             <Link href="/tontines/nouvelle" className="btn-primary text-sm">
               + Nouvelle tontine
             </Link>
@@ -266,13 +280,25 @@ export default function Dashboard() {
             <div>
               <label className="label-field">Compte (n° dépôt)</label>
               <select className="input-field" value={filtreCompteId}
-                onChange={(e) => setFiltreCompteId(e.target.value)}>
+                onChange={(e) => { setFiltreCompteId(e.target.value); setFiltreOperateur('') }}>
                 <option value="">Tous</option>
                 {comptesTransaction.map((c) => (
                   <option key={c.id} value={c.id}>{c.nom} — {c.numero}</option>
                 ))}
               </select>
             </div>
+            {filtreCompteId && operateursDuCompte.length > 0 && (
+              <div>
+                <label className="label-field">Opérateur</label>
+                <select className="input-field" value={filtreOperateur}
+                  onChange={(e) => setFiltreOperateur(e.target.value)}>
+                  <option value="">Tous</option>
+                  {operateursDuCompte.map((op) => (
+                    <option key={op} value={op}>{op}</option>
+                  ))}
+                </select>
+              </div>
+            )}
             <div className="relative">
               <label className="label-field">Membre</label>
               <div className="relative">
@@ -310,7 +336,7 @@ export default function Dashboard() {
           {hasFilters && (
             <div className="mt-3 pt-3 border-t">
               <button onClick={() => {
-                setFiltreDateDebut(''); setFiltreDateFin(''); setFiltreTontineId(''); setFiltreCompteId(''); resetMembreFiltre()
+                setFiltreDateDebut(''); setFiltreDateFin(''); setFiltreTontineId(''); setFiltreCompteId(''); setFiltreOperateur(''); resetMembreFiltre()
               }} className="text-sm text-primary-600 hover:text-primary-700 font-medium">
                 Réinitialiser les filtres
               </button>

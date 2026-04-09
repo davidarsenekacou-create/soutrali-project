@@ -7,7 +7,10 @@ import { useAuth } from '@/lib/auth'
 import Link from 'next/link'
 
 export default function TontinesPage() {
-  const { isAdmin, peutModifier, peutAccederTontine } = useAuth()
+  const { isAdmin, peutAccederTontine, hasPermission } = useAuth()
+  const peutCreer = hasPermission('tontines.create')
+  const peutEditerT = hasPermission('tontines.edit')
+  const peutSupprimerT = hasPermission('tontines.delete')
   const [tontines, setTontines] = useState<Tontine[]>([])
   const [loading, setLoading] = useState(true)
 
@@ -53,7 +56,7 @@ export default function TontinesPage() {
             {isAdmin ? 'Gérez vos groupes de tontine' : 'Vos tontines assignées'}
           </p>
         </div>
-        {peutModifier && (
+        {peutCreer && (
           <Link href="/tontines/nouvelle" className="btn-primary text-sm self-start sm:self-auto">
             + Nouvelle tontine
           </Link>
@@ -69,7 +72,7 @@ export default function TontinesPage() {
           <p className="text-gray-500 mb-6 text-sm">
             {isAdmin ? 'Commencez par créer votre première tontine' : 'Aucune tontine ne vous est assignée'}
           </p>
-          {isAdmin && (
+          {peutCreer && (
             <Link href="/tontines/nouvelle" className="btn-primary">Créer une tontine</Link>
           )}
         </div>
@@ -118,15 +121,15 @@ export default function TontinesPage() {
                         <Link href={`/tontines/${tontine.id}/membres`} className="btn-secondary text-xs sm:text-sm">
                           Membres
                         </Link>
-                        {peutModifier && (
-                          <>
-                            <button onClick={() => toggleActif(tontine.id, tontine.actif)} className="btn-secondary text-xs sm:text-sm">
-                              {tontine.actif ? 'Désactiver' : 'Activer'}
-                            </button>
-                            <button onClick={() => supprimerTontine(tontine.id, tontine.nom)} className="btn-danger text-xs sm:text-sm">
-                              Supprimer
-                            </button>
-                          </>
+                        {peutEditerT && (
+                          <button onClick={() => toggleActif(tontine.id, tontine.actif)} className="btn-secondary text-xs sm:text-sm">
+                            {tontine.actif ? 'Désactiver' : 'Activer'}
+                          </button>
+                        )}
+                        {peutSupprimerT && (
+                          <button onClick={() => supprimerTontine(tontine.id, tontine.nom)} className="btn-danger text-xs sm:text-sm">
+                            Supprimer
+                          </button>
                         )}
                       </>
                     ) : (

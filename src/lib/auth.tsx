@@ -10,7 +10,8 @@ interface AuthContextType {
   tontineIds: string[] // IDs des tontines gérées (pour les gérantes)
   isAdmin: boolean
   isResponsable: boolean
-  peutModifier: boolean // admin peut modifier, responsable et gérante non (sauf gérante sur ses tontines)
+  peutModifier: boolean // admin peut modifier (rétro-compat)
+  hasPermission: (key: string) => boolean
   login: (loginStr: string, motDePasse: string) => Promise<{ error?: string; role?: string }>
   logout: () => void
   peutAccederTontine: (tontineId: string) => boolean
@@ -23,6 +24,7 @@ const AuthContext = createContext<AuthContextType>({
   isAdmin: false,
   isResponsable: false,
   peutModifier: false,
+  hasPermission: () => false,
   login: async () => ({}),
   logout: () => {},
   peutAccederTontine: () => false,
@@ -48,7 +50,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const isAdmin = utilisateur?.role === 'admin'
   const isResponsable = utilisateur?.role === 'responsable'
-  const peutModifier = isAdmin // seul l'admin peut créer/modifier/supprimer
+  const peutModifier = isAdmin // seul l'admin a tous les droits par défaut
+
+  function hasPermission(key: string): boolean {
+    if (!utilisateur) return false
+    if (utilisateur.role === 'admin') return true // l'admin a toutes les permissions
+    return (utilisateur.permissions || []).includes(key)
+  }
 
   // Restaurer la session au chargement
   useEffect(() => {
@@ -116,7 +124,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   return (
-    <AuthContext.Provider value={{ utilisateur, loading, tontineIds, isAdmin, isResponsable, peutModifier, login, logout, peutAccederTontine }}>
+    <AuthContext.Provider value={{ utilisateur, loading, tontineIds, isAdmin, isResponsable, peutModifier, hasPermission, login, logout, peutAccederTontine }}>
       {children}
     </AuthContext.Provider>
   )
